@@ -1,6 +1,6 @@
 # LinkedIn post (Prompt 3)
 
-Paste everything between the lines. Replace `[REPO_URL]` with your public GitHub repo link (the guide requires the repo link in the main post).
+Paste everything between the lines. The repo link is already in the body (the guide requires it in the main post).
 
 ---
 
@@ -22,7 +22,7 @@ After: "don't, it failed in INC-031, 038 and 044."
 
 I picked Hindsight for agent memory; it even learned that lesson itself.
 
-Code: [REPO_URL]
+Code: https://github.com/manoj101918/hackonhyd
 
 #AIAgents #AgentMemory #Hindsight #LLM
 

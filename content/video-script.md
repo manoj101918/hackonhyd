@@ -64,7 +64,7 @@ One video per team, posted **publicly on YouTube** (not Google Drive). Record at
 4. Watch an AI agent learn from an outage in real time
 5. Why your AI assistant keeps repeating last month's mistake
 
-**Description template:** one-line summary, then `Code: [REPO_URL]`, `Article: [ARTICLE_URL]`, `Hindsight: https://github.com/vectorize-io/hindsight`.
+**Description template:** one-line summary, then `Code: https://github.com/manoj101918/hackonhyd`, `Article: [ARTICLE_URL]`, `Hindsight: https://github.com/vectorize-io/hindsight`.
 
 ---
 

@@ -15,14 +15,10 @@ Everything the content guide asks for, drafted from this repo. Your job: add you
 ## Checklist
 
 ### 0. Repo (once per team)
-- [ ] Create a **public** GitHub repo and push (commands in the main README / below).
-- [ ] Replace every `[REPO_URL]` in `content/` with the repo link.
-- [ ] Confirm `.env` is **not** in the repo (it's gitignored).
-
-```bash
-git remote add origin https://github.com/<you>/<repo>.git
-git push -u origin main
-```
+- [x] Pushed to https://github.com/manoj101918/hackonhyd. Make sure it's set to **Public** (Settings → General → Danger Zone → Change visibility).
+- [x] Repo link filled into the article, post and video description.
+- [x] `.env` is not in the repo (gitignored).
+- [ ] Once published, replace `[ARTICLE_URL]` / `[YOUTUBE_URL]` in the main README and video description.
 
 ### 1. Article (every team member, each their own)
 - [ ] Pick a title from `titles.md` (or keep the recommended one).

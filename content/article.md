@@ -135,4 +135,4 @@ I also keep a Hindsight mental model, a "remediation playbook", set to refresh a
 
 It isn't perfect. Consolidated observations can be near-duplicates of each other, and the agent still over-matches on a strong error string now and then. But going from an assistant with no history to one that has read every past postmortem is a real step. If you're building agents that act more than once, it's worth [understanding what agent memory actually is](https://vectorize.io/what-is-agent-memory) before you reach for a vector store and call it done.
 
-The code is on GitHub: [REPO_URL]
+The code is on GitHub: https://github.com/manoj101918/hackonhyd
