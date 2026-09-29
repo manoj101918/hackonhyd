@@ -1,0 +1,302 @@
+[
+  {
+    "id": "DEP-2201",
+    "service": "api-gateway",
+    "kind": "infra",
+    "version": "ingress-nginx 1.10.1",
+    "description": "Upgrade ingress-nginx controller 1.9.4 -> 1.10.1 on the prod cluster",
+    "author": "Rahul Iyer",
+    "deployed_at": "2026-07-01T12:17:00Z",
+    "linked_incident_id": "INC-027"
+  },
+  {
+    "id": "DEP-2202",
+    "service": "api-gateway",
+    "kind": "infra",
+    "version": "ingress-nginx 1.10.3",
+    "description": "Upgrade ingress-nginx 1.9.4 -> 1.10.3 with upstream-keepalive-timeout=15s",
+    "author": "Aisha Okafor",
+    "deployed_at": "2026-07-02T07:55:00Z",
+    "linked_incident_id": null
+  },
+  {
+    "id": "DEP-2203",
+    "service": "checkout-api",
+    "kind": "config",
+    "version": "checkout-api config r425",
+    "description": "Feature flag: enable express checkout for 10% of users",
+    "author": "Karthik Reddy",
+    "deployed_at": "2026-07-02T10:28:00Z",
+    "linked_incident_id": null
+  },
+  {
+    "id": "DEP-2204",
+    "service": "notification-worker",
+    "kind": "code",
+    "version": "notification-worker v1.17.0",
+    "description": "Push notification templates for order shipped",
+    "author": "Sneha Kulkarni",
+    "deployed_at": "2026-07-03T04:05:00Z",
+    "linked_incident_id": null
+  },
+  {
+    "id": "DEP-2205",
+    "service": "inventory-db",
+    "kind": "migration",
+    "version": "checkout-api migration V209",
+    "description": "Add column orders.gift_message",
+    "author": "Tom Becker",
+    "deployed_at": "2026-07-03T11:52:00Z",
+    "linked_incident_id": null
+  },
+  {
+    "id": "DEP-2206",
+    "service": "api-gateway",
+    "kind": "config",
+    "version": "api-gateway config r198",
+    "description": "Add security headers (HSTS preload)",
+    "author": "Sneha Kulkarni",
+    "deployed_at": "2026-07-05T13:08:00Z",
+    "linked_incident_id": null
+  },
+  {
+    "id": "DEP-2207",
+    "service": "auth-service",
+    "kind": "config",
+    "version": "secret rotation 2026-07",
+    "description": "Scheduled rotation of the JWT signing key (new kid acme-2026-07) — signer switched to the new key immediately",
+    "author": "Priya Raman",
+    "deployed_at": "2026-07-05T13:09:00Z",
+    "linked_incident_id": "INC-028"
+  },
+  {
+    "id": "DEP-2208",
+    "service": "payment-service",
+    "kind": "code",
+    "version": "payment-service v1.45.0",
+    "description": "Refund status polling job moved to a separate worker",
+    "author": "Arjun Mehta",
+    "deployed_at": "2026-07-07T03:39:00Z",
+    "linked_incident_id": null
+  },
+  {
+    "id": "DEP-2209",
+    "service": "redis-cache",
+    "kind": "config",
+    "version": "checkout-api config r412",
+    "description": "checkout-api config: raise product-catalog cache TTL from 1h to 24h (catalog.cache.ttl=86400)",
+    "author": "Sneha Kulkarni",
+    "deployed_at": "2026-07-09T09:30:00Z",
+    "linked_incident_id": "INC-029"
+  },
+  {
+    "id": "DEP-2210",
+    "service": "payment-service",
+    "kind": "code",
+    "version": "payment-service v1.41.0",
+    "description": "Structured logging for PayFlow webhooks",
+    "author": "Karthik Reddy",
+    "deployed_at": "2026-07-09T18:37:00Z",
+    "linked_incident_id": null
+  },
+  {
+    "id": "DEP-2211",
+    "service": "payment-service",
+    "kind": "config",
+    "version": "payment-service config r88",
+    "description": "payment-service config: lower PayFlow HTTP client timeout from 8000ms to 2000ms to fail fast",
+    "author": "Kenji Watanabe",
+    "deployed_at": "2026-07-25T04:29:00Z",
+    "linked_incident_id": "INC-033"
+  },
+  {
+    "id": "DEP-2212",
+    "service": "auth-service",
+    "kind": "infra",
+    "version": "infra PR #1182",
+    "description": "Move redis-cache behind an internal AWS NLB (350s idle timeout)",
+    "author": "Kenji Watanabe",
+    "deployed_at": "2026-07-31T07:57:00Z",
+    "linked_incident_id": "INC-035"
+  },
+  {
+    "id": "DEP-2213",
+    "service": "checkout-api",
+    "kind": "code",
+    "version": "checkout-api v2.28.0",
+    "description": "Wishlist price-drop banner on cart page",
+    "author": "Maria Gonzalez",
+    "deployed_at": "2026-07-31T09:27:00Z",
+    "linked_incident_id": null
+  },
+  {
+    "id": "DEP-2214",
+    "service": "auth-service",
+    "kind": "code",
+    "version": "auth-service v3.9.1",
+    "description": "Dependency bumps (express 4.21, jsonwebtoken 9.0.2)",
+    "author": "Kenji Watanabe",
+    "deployed_at": "2026-08-07T14:44:00Z",
+    "linked_incident_id": null
+  },
+  {
+    "id": "DEP-2215",
+    "service": "payment-service",
+    "kind": "config",
+    "version": "payment-service config r92",
+    "description": "Rotate PayFlow webhook signing secret",
+    "author": "Lucas Silva",
+    "deployed_at": "2026-08-13T04:57:00Z",
+    "linked_incident_id": null
+  },
+  {
+    "id": "DEP-2216",
+    "service": "checkout-api",
+    "kind": "code",
+    "version": "checkout-api v2.24.0",
+    "description": "Add UPI Autopay as a checkout payment option",
+    "author": "Aisha Okafor",
+    "deployed_at": "2026-08-13T21:28:00Z",
+    "linked_incident_id": null
+  },
+  {
+    "id": "DEP-2217",
+    "service": "auth-service",
+    "kind": "code",
+    "version": "auth-service v3.6.4",
+    "description": "Add OTP login via WhatsApp",
+    "author": "Aisha Okafor",
+    "deployed_at": "2026-08-14T20:25:00Z",
+    "linked_incident_id": null
+  },
+  {
+    "id": "DEP-2218",
+    "service": "notification-worker",
+    "kind": "code",
+    "version": "notification-worker v1.18.3",
+    "description": "Retry transient SMTP 451 errors",
+    "author": "Aisha Okafor",
+    "deployed_at": "2026-08-14T21:23:00Z",
+    "linked_incident_id": null
+  },
+  {
+    "id": "DEP-2219",
+    "service": "auth-service",
+    "kind": "code",
+    "version": "auth-service v3.8.0",
+    "description": "auth-service v3.8.0: raise bcrypt cost factor from 10 to 14 for password hashing",
+    "author": "Tom Becker",
+    "deployed_at": "2026-08-18T10:15:00Z",
+    "linked_incident_id": "INC-039"
+  },
+  {
+    "id": "DEP-2220",
+    "service": "payment-service",
+    "kind": "code",
+    "version": "payment-service v1.43.2",
+    "description": "Add UPI intent flow for Android",
+    "author": "Lucas Silva",
+    "deployed_at": "2026-08-20T11:34:00Z",
+    "linked_incident_id": null
+  },
+  {
+    "id": "DEP-2221",
+    "service": "inventory-db",
+    "kind": "migration",
+    "version": "checkout-api migration V212",
+    "description": "checkout-api migration V212: rebuild orders indexes (drops idx_orders_customer_created, recreated in V213 not yet deployed)",
+    "author": "Kenji Watanabe",
+    "deployed_at": "2026-08-22T11:40:00Z",
+    "linked_incident_id": "INC-040"
+  },
+  {
+    "id": "DEP-2222",
+    "service": "payment-service",
+    "kind": "config",
+    "version": "payment-service config r97",
+    "description": "payment-service config: reduce PayFlow http max_idle_conns_per_host 100 -> 10 and idle_conn_timeout 90s -> 10s to cut memory",
+    "author": "Arjun Mehta",
+    "deployed_at": "2026-08-26T07:06:00Z",
+    "linked_incident_id": "INC-041"
+  },
+  {
+    "id": "DEP-2223",
+    "service": "redis-cache",
+    "kind": "config",
+    "version": "auth-service config r54",
+    "description": "auth-service config: extend session TTL from 30m to 7d (remember-me by default)",
+    "author": "Arjun Mehta",
+    "deployed_at": "2026-08-28T16:13:00Z",
+    "linked_incident_id": "INC-042"
+  },
+  {
+    "id": "DEP-2224",
+    "service": "checkout-api",
+    "kind": "code",
+    "version": "checkout-api v2.26.1",
+    "description": "Fix rounding of GST in order summary",
+    "author": "Kenji Watanabe",
+    "deployed_at": "2026-09-03T22:45:00Z",
+    "linked_incident_id": null
+  },
+  {
+    "id": "DEP-2225",
+    "service": "api-gateway",
+    "kind": "config",
+    "version": "api-gateway config r203",
+    "description": "api-gateway: add global rate limit of 100 r/s per client IP for bot protection",
+    "author": "Sneha Kulkarni",
+    "deployed_at": "2026-09-04T16:20:00Z",
+    "linked_incident_id": "INC-043"
+  },
+  {
+    "id": "DEP-2226",
+    "service": "inventory-db",
+    "kind": "config",
+    "version": "inventory-db param group r19",
+    "description": "Enable pg_stat_statements track_io_timing",
+    "author": "Aisha Okafor",
+    "deployed_at": "2026-09-07T12:41:00Z",
+    "linked_incident_id": null
+  },
+  {
+    "id": "DEP-2227",
+    "service": "redis-cache",
+    "kind": "infra",
+    "version": "redis-cache 7.2.5",
+    "description": "Patch upgrade Redis 7.2.4 -> 7.2.5",
+    "author": "Ananya Das",
+    "deployed_at": "2026-09-15T14:25:00Z",
+    "linked_incident_id": null
+  },
+  {
+    "id": "DEP-2228",
+    "service": "checkout-api",
+    "kind": "config",
+    "version": "checkout-api config r430",
+    "description": "checkout-api: set -Xmx3g (container limit 3Gi) to reduce GC pauses",
+    "author": "Karthik Reddy",
+    "deployed_at": "2026-09-16T12:11:00Z",
+    "linked_incident_id": "INC-045"
+  },
+  {
+    "id": "DEP-2229",
+    "service": "notification-worker",
+    "kind": "config",
+    "version": "notification-worker config r61",
+    "description": "notification-worker: enable acks_late with SQS visibility_timeout 300s",
+    "author": "Arjun Mehta",
+    "deployed_at": "2026-09-23T11:10:00Z",
+    "linked_incident_id": "INC-046"
+  },
+  {
+    "id": "DEP-2230",
+    "service": "auth-service",
+    "kind": "config",
+    "version": "auth-service config r57",
+    "description": "Raise login rate limit from 5 to 8 attempts per minute",
+    "author": "Sneha Kulkarni",
+    "deployed_at": "2026-09-23T12:41:00Z",
+    "linked_incident_id": null
+  }
+]

@@ -1,0 +1,1200 @@
+[
+  {
+    "id": "INC-027",
+    "title": "Intermittent 504s on /api/* after ingress-nginx upgrade",
+    "service": "api-gateway",
+    "severity": "SEV2",
+    "pattern": "gateway-keepalive",
+    "started_at": "2026-07-01T13:07:00Z",
+    "resolved_at": "2026-07-01T14:22:00Z",
+    "ttr_minutes": 75,
+    "triage_minutes": 32,
+    "commander": "Kenji Watanabe",
+    "responders": [
+      "Fatima Sheikh",
+      "Rahul Iyer"
+    ],
+    "alert": "api-gateway 5xx ratio 7.4% (threshold 2%) for 5m — mostly 504 Gateway Timeout on /api/checkout/*",
+    "symptoms": [
+      "504 Gateway Timeout on ~7% of /api/checkout requests",
+      "checkout-api itself reports healthy p99 of 310ms",
+      "errors cluster on connections idle for >20s"
+    ],
+    "metrics": {
+      "gateway_5xx_ratio": "7.4%",
+      "checkout_api_p99_ms": 310,
+      "upstream_connect_errors_per_min": 480
+    },
+    "logs": [
+      "2026-07-01T13:07:30Z [error] 31#31: *13676 upstream timed out (110: Connection timed out) while reading response header from upstream, client: 10.42.2.25, server: api.acme.shop, request: \"POST /api/checkout/confirm HTTP/2.0\", upstream: \"http://10.42.7.21:8080/checkout/confirm\"",
+      "2026-07-01T13:08:35Z [error] 29#29: *22319 upstream prematurely closed connection while reading response header from upstream, client: 10.42.11.215, server: api.acme.shop, request: \"GET /api/checkout/cart HTTP/2.0\"",
+      "2026-07-01T13:09:44Z [warn] 31#31: *42245 upstream server temporarily disabled while reading response header from upstream"
+    ],
+    "steps": [
+      {
+        "action": "Increase proxy-read-timeout on the ingress from 60s to 120s",
+        "outcome": "PARTIAL",
+        "minutes": 14,
+        "notes": "504s dropped to ~3% but p99 latency rose to 40s",
+        "by": "Kenji Watanabe",
+        "at": "2026-07-01T13:55:00Z"
+      },
+      {
+        "action": "Restart ingress-nginx controller pods",
+        "outcome": "FAILED",
+        "minutes": 9,
+        "notes": "504s returned within 2 minutes of the restart",
+        "by": "Rahul Iyer",
+        "at": "2026-07-01T14:04:00Z"
+      },
+      {
+        "action": "Roll back ingress-nginx to 1.9.4",
+        "outcome": "WORKED",
+        "minutes": 18,
+        "notes": "5xx back under 0.2% within 5 minutes of rollback",
+        "by": "Kenji Watanabe",
+        "at": "2026-07-01T14:22:00Z"
+      }
+    ],
+    "root_cause": "ingress-nginx 1.10 raised the default upstream keepalive timeout to 60s, longer than checkout-api's Tomcat keepAliveTimeout of 20s, so NGINX reused connections the backend had already closed.",
+    "postmortem": "Upstream keepalive timeouts at the gateway must stay below every backend's server-side idle timeout. Action items: pin upstream-keepalive-timeout=15s, add an upgrade checklist for ingress defaults, canary ingress upgrades on one node pool first.",
+    "trigger_deploy_id": "DEP-2201",
+    "agent_suggestions": [],
+    "dejavu_assisted": false
+  },
+  {
+    "id": "INC-028",
+    "title": "Login and API auth failures — JWT signature verification failed after key rotation",
+    "service": "auth-service",
+    "severity": "SEV1",
+    "pattern": "jwks-stale-cache",
+    "started_at": "2026-07-05T13:31:00Z",
+    "resolved_at": "2026-07-05T14:24:00Z",
+    "ttr_minutes": 53,
+    "triage_minutes": 29,
+    "commander": "Olivia Novak",
+    "responders": [
+      "Aisha Okafor",
+      "Vikram Singh"
+    ],
+    "alert": "auth-service 401 rate 46% (baseline 1.5%) — 'JWT signature verification failed' across all API consumers",
+    "symptoms": [
+      "Nearly half of authenticated API calls return 401",
+      "Only tokens issued after 03:10 UTC fail",
+      "Newly deployed pods verify tokens fine"
+    ],
+    "metrics": {
+      "auth_401_ratio": "46%",
+      "login_success_rate": "52%"
+    },
+    "logs": [
+      "2026-07-05T13:31:30Z ERROR [auth] JsonWebTokenError: JWT signature verification failed: invalid signature (kid=\"acme-2026-07\") req=45d2cce8",
+      "2026-07-05T13:32:04Z WARN  [jwks] kid \"acme-2026-07\" not found in cached JWKS (cache age 3480s, ttl 3600s) — falling back to cached keyset",
+      "2026-07-05T13:33:28Z ERROR [middleware/verify] 401 Unauthorized path=/api/orders sub=user_45313 kid=acme-2026-07"
+    ],
+    "steps": [
+      {
+        "action": "Verify the new signing key secret is mounted correctly in auth-service",
+        "outcome": "PARTIAL",
+        "minutes": 11,
+        "notes": "Secret was correct; confirmed only verifiers with old JWKS cache were failing",
+        "by": "Aisha Okafor",
+        "at": "2026-07-05T14:16:00Z"
+      },
+      {
+        "action": "Rolling restart of auth-service pods to flush the in-memory JWKS cache",
+        "outcome": "WORKED",
+        "minutes": 8,
+        "notes": "401 rate back to baseline as soon as the rollout finished",
+        "by": "Olivia Novak",
+        "at": "2026-07-05T14:24:00Z"
+      }
+    ],
+    "root_cause": "Verifiers cache the JWKS for 1 hour. The rotation published the new key and started signing with it at the same moment, so verifiers with a warm cache rejected every new token until the cache expired.",
+    "postmortem": "Key rotation must publish the new key at least one JWKS cache TTL before signing with it. In this case a restart was the correct fix because the fault was stale in-process state. Action items: overlap window in the rotation job, refetch JWKS on unknown kid.",
+    "trigger_deploy_id": "DEP-2207",
+    "agent_suggestions": [],
+    "dejavu_assisted": false
+  },
+  {
+    "id": "INC-029",
+    "title": "Redis eviction storm after product-catalog cache TTL change — checkout p99 4.8s",
+    "service": "redis-cache",
+    "severity": "SEV2",
+    "pattern": "redis-eviction-ttl",
+    "started_at": "2026-07-09T12:35:00Z",
+    "resolved_at": "2026-07-09T13:52:00Z",
+    "ttr_minutes": 77,
+    "triage_minutes": 27,
+    "commander": "Tom Becker",
+    "responders": [
+      "Rahul Iyer",
+      "Priya Raman"
+    ],
+    "alert": "redis-cache evicted_keys 38k/s, used_memory at maxmemory (6gb); checkout-api p99 latency 4.8s",
+    "symptoms": [
+      "Redis at maxmemory with a massive eviction rate",
+      "Catalog cache miss rate 71%",
+      "inventory-db CPU 92% from cache-miss read load",
+      "Some users logged out (session keys evicted)"
+    ],
+    "metrics": {
+      "evicted_keys_per_s": 38000,
+      "used_memory": "5.99G/6.00G",
+      "cache_miss_rate": "71%",
+      "inventory_db_cpu": "92%"
+    },
+    "logs": [
+      "2026-07-09T12:35:30Z WARN  c.a.checkout.cache.CatalogCache - cache miss rate 71% over 5m window (baseline 6%)",
+      "2026-07-09T12:36:02Z ERROR c.a.checkout.cache.CatalogCache - io.lettuce.core.RedisCommandExecutionException: OOM command not allowed when used memory > 'maxmemory'.",
+      "2026-07-09T12:38:12Z # redis-cache INFO stats: evicted_keys:18294411 keyspace_misses:9120442 used_memory_human:5.99G maxmemory_policy:allkeys-lru"
+    ],
+    "steps": [
+      {
+        "action": "FLUSHDB the catalog keyspace on redis-cache to free memory",
+        "outcome": "FAILED",
+        "minutes": 12,
+        "notes": "Thundering herd: inventory-db CPU hit 100% and checkout p99 went to 9s",
+        "by": "Priya Raman",
+        "at": "2026-07-09T13:17:00Z"
+      },
+      {
+        "action": "Revert catalog cache TTL to 1h",
+        "outcome": "PARTIAL",
+        "minutes": 20,
+        "notes": "Memory pressure eased slowly as long-TTL keys aged out",
+        "by": "Priya Raman",
+        "at": "2026-07-09T13:37:00Z"
+      },
+      {
+        "action": "Raise maxmemory 6gb -> 10gb and switch maxmemory-policy to volatile-lru",
+        "outcome": "WORKED",
+        "minutes": 15,
+        "notes": "Evictions stopped; sessions no longer evicted",
+        "by": "Tom Becker",
+        "at": "2026-07-09T13:52:00Z"
+      }
+    ],
+    "root_cause": "A 24x longer catalog TTL grew the keyspace past maxmemory; with allkeys-lru Redis evicted hot catalog and session keys continuously, pushing reads onto inventory-db.",
+    "postmortem": "Cache TTL changes are capacity changes. Never flush a hot cache during an incident (thundering herd). Action items: capacity estimate required for TTL changes, volatile-lru policy, memory alerts at 80%.",
+    "trigger_deploy_id": "DEP-2209",
+    "agent_suggestions": [],
+    "dejavu_assisted": false
+  },
+  {
+    "id": "INC-030",
+    "title": "notification-worker pods OOMKilled in a loop — order emails delayed 40 min",
+    "service": "notification-worker",
+    "severity": "SEV3",
+    "pattern": "worker-oom",
+    "started_at": "2026-07-13T03:32:00Z",
+    "resolved_at": "2026-07-13T04:56:00Z",
+    "ttr_minutes": 84,
+    "triage_minutes": 44,
+    "commander": "Emily Chen",
+    "responders": [
+      "Sneha Kulkarni",
+      "Arjun Mehta"
+    ],
+    "alert": "notification-worker restarts > 10 in 15m (OOMKilled); email queue depth 84k",
+    "symptoms": [
+      "Pods restarting with exit code 137",
+      "Order confirmation emails delayed ~40 minutes",
+      "Started with the marketing campaign send"
+    ],
+    "metrics": {
+      "pod_restarts_15m": 23,
+      "queue_depth": 84000,
+      "memory_limit": "512Mi"
+    },
+    "logs": [
+      "2026-07-13T03:32:30Z Last State: Terminated  Reason: OOMKilled  Exit Code: 137  (pod notification-worker-12da86a78-qfxkx)",
+      "2026-07-13T03:33:58Z ERROR celery.worker.request: Task handler raised error: WorkerLostError('Worker exited prematurely: signal 9 (SIGKILL) Job: 412.')",
+      "2026-07-13T03:34:02Z INFO  notifications.campaign: rendering campaign \"monsoon-sale\" for batch of 50000 recipients"
+    ],
+    "steps": [
+      {
+        "action": "Raise notification-worker memory limit 512Mi -> 1Gi",
+        "outcome": "PARTIAL",
+        "minutes": 16,
+        "notes": "OOMs less frequent but still happening under the campaign batch",
+        "by": "Emily Chen",
+        "at": "2026-07-13T04:34:00Z"
+      },
+      {
+        "action": "Lower Celery --prefetch-multiplier from 16 to 1 and split campaign batches to 2k recipients",
+        "outcome": "WORKED",
+        "minutes": 22,
+        "notes": "Memory flat at ~380Mi, queue drained in 25 min",
+        "by": "Arjun Mehta",
+        "at": "2026-07-13T04:56:00Z"
+      }
+    ],
+    "root_cause": "Campaign tasks loaded a 50k-recipient template context each, and prefetch-multiplier 16 held many such tasks in memory per worker.",
+    "postmortem": "Bulk sends must be chunked. Action items: batch size cap in the campaign API, prefetch 1 for heavy queues, separate queue for marketing sends.",
+    "trigger_deploy_id": null,
+    "agent_suggestions": [],
+    "dejavu_assisted": false
+  },
+  {
+    "id": "INC-031",
+    "title": "checkout-api HTTP 500s — HikariCP pool exhausted, inventory-db out of connection slots",
+    "service": "checkout-api",
+    "severity": "SEV1",
+    "pattern": "db-pool-exhaustion",
+    "started_at": "2026-07-17T12:35:00Z",
+    "resolved_at": "2026-07-17T14:18:00Z",
+    "ttr_minutes": 103,
+    "triage_minutes": 34,
+    "commander": "Ananya Das",
+    "responders": [
+      "Sneha Kulkarni",
+      "Priya Raman"
+    ],
+    "alert": "checkout-api HTTP 5xx ratio 38% (threshold 2%) for 5m; p99 latency 30s",
+    "symptoms": [
+      "38% of checkout requests return HTTP 500",
+      "Requests hang ~30s then fail",
+      "inventory-db refuses new connections",
+      "HPA had scaled checkout-api from 8 to 16 pods for the weekend sale"
+    ],
+    "metrics": {
+      "http_5xx_ratio": "38%",
+      "p99_latency_ms": 30012,
+      "pg_connections": "397/400",
+      "idle_in_transaction": 182,
+      "checkout_pods": 16
+    },
+    "logs": [
+      "2026-07-17T12:35:30Z ERROR o.h.engine.jdbc.spi.SqlExceptionHelper - HikariPool-1 - Connection is not available, request timed out after 30000ms.",
+      "2026-07-17T12:36:34Z ERROR c.a.checkout.api.OrderController - POST /checkout/confirm failed req=a0385813: org.springframework.jdbc.CannotGetJdbcConnectionException: Failed to obtain JDBC Connection",
+      "2026-07-17T12:37:30Z FATAL:  remaining connection slots are reserved for non-replication superuser connections  (inventory-db, client 10.42.12.77)",
+      "2026-07-17T12:37:42Z WARN  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Thread starvation or clock leap detected (housekeeper delta=58s)"
+    ],
+    "steps": [
+      {
+        "action": "Restart checkout-api pods",
+        "outcome": "FAILED",
+        "minutes": 12,
+        "notes": "HTTP 500s returned within 4 minutes as new pods refilled their pools",
+        "by": "Sneha Kulkarni",
+        "at": "2026-07-17T13:24:00Z"
+      },
+      {
+        "action": "Scale checkout-api from 16 to 24 replicas",
+        "outcome": "FAILED",
+        "minutes": 9,
+        "notes": "Made it worse: every new pod opened 20 more connections against inventory-db",
+        "by": "Ananya Das",
+        "at": "2026-07-17T13:33:00Z"
+      },
+      {
+        "action": "Terminate idle-in-transaction sessions on inventory-db with pg_terminate_backend",
+        "outcome": "PARTIAL",
+        "minutes": 10,
+        "notes": "Errors dropped for ~6 minutes, then came back",
+        "by": "Sneha Kulkarni",
+        "at": "2026-07-17T13:43:00Z"
+      },
+      {
+        "action": "Cap Hikari maximumPoolSize at 10 per pod and set idle_in_transaction_session_timeout=60s on inventory-db",
+        "outcome": "WORKED",
+        "minutes": 35,
+        "notes": "Connections fell to 210/400 and 5xx cleared",
+        "by": "Ananya Das",
+        "at": "2026-07-17T14:18:00Z"
+      }
+    ],
+    "root_cause": "Connection-pool exhaustion on inventory-db: HPA scale-out multiplied per-pod pools (16 pods x 20) past max_connections=400, while a reporting query path left sessions idle in transaction.",
+    "postmortem": "Total pool size across all replicas must stay below inventory-db max_connections. Restarting or scaling out makes pool exhaustion worse. Action items: PgBouncer in transaction mode, pool caps tied to HPA max, idle_in_transaction_session_timeout on all databases.",
+    "trigger_deploy_id": null,
+    "agent_suggestions": [],
+    "dejavu_assisted": false
+  },
+  {
+    "id": "INC-032",
+    "title": "TLS certificate for api.acme.shop expired — all clients failing TLS handshake",
+    "service": "api-gateway",
+    "severity": "SEV1",
+    "pattern": "tls-expiry",
+    "started_at": "2026-07-21T08:05:00Z",
+    "resolved_at": "2026-07-21T09:29:00Z",
+    "ttr_minutes": 84,
+    "triage_minutes": 50,
+    "commander": "Aisha Okafor",
+    "responders": [
+      "Fatima Sheikh",
+      "Rahul Iyer"
+    ],
+    "alert": "Synthetic check: api.acme.shop TLS handshake failed (certificate has expired)",
+    "symptoms": [
+      "Browsers and mobile apps show certificate errors",
+      "cert-manager renewal had been failing silently for 9 days"
+    ],
+    "metrics": {
+      "successful_handshakes": "0%"
+    },
+    "logs": [
+      "2026-07-21T08:05:30Z cert-manager: Failed to finalize order: acme: authorization error for api.acme.shop: 403 urn:ietf:params:acme:error:unauthorized: Invalid response from http://api.acme.shop/.well-known/acme-challenge/...",
+      "2026-07-21T08:06:57Z SSL_do_handshake() failed (SSL: error:0A000086:SSL routines::certificate verify failed) while SSL handshaking to upstream"
+    ],
+    "steps": [
+      {
+        "action": "Trigger manual cert-manager renewal with the HTTP-01 solver",
+        "outcome": "FAILED",
+        "minutes": 10,
+        "notes": "WAF rule still blocked /.well-known/acme-challenge",
+        "by": "Aisha Okafor",
+        "at": "2026-07-21T09:08:00Z"
+      },
+      {
+        "action": "Switch the issuer to DNS-01 and reissue the certificate",
+        "outcome": "WORKED",
+        "minutes": 21,
+        "notes": "New certificate served; handshakes recovered",
+        "by": "Aisha Okafor",
+        "at": "2026-07-21T09:29:00Z"
+      }
+    ],
+    "root_cause": "A new WAF rule blocked the /.well-known/acme-challenge path, so HTTP-01 renewals had been failing for 9 days until the certificate expired.",
+    "postmortem": "Alert on certificate expiry < 14 days and on cert-manager order failures. Use DNS-01 for public endpoints behind the WAF.",
+    "trigger_deploy_id": null,
+    "agent_suggestions": [],
+    "dejavu_assisted": false
+  },
+  {
+    "id": "INC-033",
+    "title": "Card payments failing — PayFlow authorization timeouts after client timeout config change",
+    "service": "payment-service",
+    "severity": "SEV1",
+    "pattern": "payment-config-psp",
+    "started_at": "2026-07-25T05:09:00Z",
+    "resolved_at": "2026-07-25T06:29:00Z",
+    "ttr_minutes": 80,
+    "triage_minutes": 47,
+    "commander": "Ananya Das",
+    "responders": [
+      "Kenji Watanabe",
+      "Sneha Kulkarni"
+    ],
+    "alert": "payment-service authorize success rate 61% (baseline 97%); PayFlow 429 rate rising",
+    "symptoms": [
+      "39% of card authorizations fail",
+      "Errors are client-side timeouts at exactly 2s",
+      "Retry traffic triggered PayFlow rate limiting (HTTP 429)"
+    ],
+    "metrics": {
+      "authorize_success_rate": "61%",
+      "payflow_p95_ms": 2400,
+      "payflow_429_per_min": 1300
+    },
+    "logs": [
+      "2026-07-25T05:09:30Z level=error msg=\"payflow authorize failed\" order_id=ORD-82819658 err=\"context deadline exceeded (Client.Timeout exceeded while awaiting headers)\" latency_ms=2001",
+      "2026-07-25T05:10:41Z level=warn msg=\"retrying payflow request\" attempt=2 max_attempts=3 order_id=ORD-87979278",
+      "2026-07-25T05:11:14Z level=error msg=\"payflow authorize failed\" order_id=ORD-85082596 status=429 err=\"rate limit exceeded\""
+    ],
+    "steps": [
+      {
+        "action": "Restart payment-service pods",
+        "outcome": "FAILED",
+        "minutes": 8,
+        "notes": "No change; timeouts are config-driven",
+        "by": "Ananya Das",
+        "at": "2026-07-25T06:07:00Z"
+      },
+      {
+        "action": "Scale payment-service from 6 to 12 replicas",
+        "outcome": "FAILED",
+        "minutes": 10,
+        "notes": "More concurrent retries; PayFlow 429s doubled",
+        "by": "Ananya Das",
+        "at": "2026-07-25T06:17:00Z"
+      },
+      {
+        "action": "Revert PayFlow client timeout to 8000ms",
+        "outcome": "WORKED",
+        "minutes": 12,
+        "notes": "Authorize success back to 97% within 4 minutes",
+        "by": "Kenji Watanabe",
+        "at": "2026-07-25T06:29:00Z"
+      }
+    ],
+    "root_cause": "The new 2s client timeout was below PayFlow's peak p95 of 2.4s (3-D Secure flows). Timeouts plus 3 retries created a retry storm that got payment-service rate-limited by PayFlow.",
+    "postmortem": "payment-service PSP client settings (timeouts, retries, connection pools) are high-risk changes: they must go through canary during off-peak hours with PayFlow latency percentiles checked first. Estimated lost GMV: Rs 38 lakh.",
+    "trigger_deploy_id": "DEP-2211",
+    "agent_suggestions": [],
+    "dejavu_assisted": false
+  },
+  {
+    "id": "INC-034",
+    "title": "inventory-db disk at 97% — WAL growth from inactive replication slot",
+    "service": "inventory-db",
+    "severity": "SEV2",
+    "pattern": "wal-replication-slot",
+    "started_at": "2026-07-29T14:07:00Z",
+    "resolved_at": "2026-07-29T15:07:00Z",
+    "ttr_minutes": 60,
+    "triage_minutes": 25,
+    "commander": "Fatima Sheikh",
+    "responders": [
+      "Arjun Mehta",
+      "Tom Becker"
+    ],
+    "alert": "inventory-db primary disk usage 97% (threshold 85%), growing 4GB/hour",
+    "symptoms": [
+      "pg_wal directory at 310GB",
+      "Inactive logical replication slot analytics_cdc",
+      "Analytics CDC connector down for 3 days"
+    ],
+    "metrics": {
+      "disk_used": "97%",
+      "pg_wal_size_gb": 310
+    },
+    "logs": [
+      "2026-07-29T14:07:30Z LOG:  checkpoints are occurring too frequently (24 seconds apart)",
+      "2026-07-29T14:08:56Z WARNING:  replication slot \"analytics_cdc\" is inactive; restart_lsn 1F3/9A0000 is 312 GB behind"
+    ],
+    "steps": [
+      {
+        "action": "Expand the primary volume from 500GB to 750GB",
+        "outcome": "PARTIAL",
+        "minutes": 18,
+        "notes": "Bought time but WAL kept growing",
+        "by": "Arjun Mehta",
+        "at": "2026-07-29T14:53:00Z"
+      },
+      {
+        "action": "Drop the inactive replication slot analytics_cdc after confirming with the data team",
+        "outcome": "WORKED",
+        "minutes": 14,
+        "notes": "WAL recycled; disk back to 58%",
+        "by": "Tom Becker",
+        "at": "2026-07-29T15:07:00Z"
+      }
+    ],
+    "root_cause": "The analytics Debezium connector had been down for 3 days, so its logical replication slot pinned WAL on the primary.",
+    "postmortem": "Alert on replication slot lag. Set max_slot_wal_keep_size=100GB so an abandoned slot can never fill the disk.",
+    "trigger_deploy_id": null,
+    "agent_suggestions": [],
+    "dejavu_assisted": false
+  },
+  {
+    "id": "INC-035",
+    "title": "auth-service intermittent 502s — ECONNRESET to redis-cache after NLB migration",
+    "service": "auth-service",
+    "severity": "SEV2",
+    "pattern": "redis-nlb-idle",
+    "started_at": "2026-08-02T08:17:00Z",
+    "resolved_at": "2026-08-02T09:22:00Z",
+    "ttr_minutes": 65,
+    "triage_minutes": 25,
+    "commander": "Kenji Watanabe",
+    "responders": [
+      "Fatima Sheikh",
+      "Maria Gonzalez"
+    ],
+    "alert": "auth-service 5xx ratio 4.1% — 'read ECONNRESET' from redis client",
+    "symptoms": [
+      "Failures on the first Redis command after a quiet period",
+      "Worse overnight when traffic is low"
+    ],
+    "metrics": {
+      "auth_5xx_ratio": "4.1%"
+    },
+    "logs": [
+      "2026-08-02T08:17:30Z ERROR [session-store] Error: read ECONNRESET at TCP.onStreamRead (node:internal/stream_base_commons:217:20) req=79bfbdab",
+      "2026-08-02T08:18:22Z WARN  [ioredis] Reconnecting to redis-cache.acme.internal:6379 (attempt 1)"
+    ],
+    "steps": [
+      {
+        "action": "Restart auth-service pods",
+        "outcome": "PARTIAL",
+        "minutes": 9,
+        "notes": "Fixed until connections sat idle again (~6 minutes later)",
+        "by": "Maria Gonzalez",
+        "at": "2026-08-02T08:57:00Z"
+      },
+      {
+        "action": "Enable TCP keepAlive (30s) in the ioredis client config",
+        "outcome": "WORKED",
+        "minutes": 25,
+        "notes": "No ECONNRESET for 24h",
+        "by": "Kenji Watanabe",
+        "at": "2026-08-02T09:22:00Z"
+      }
+    ],
+    "root_cause": "The NLB silently dropped idle TCP connections after 350s; ioredis had no keepalive, so the first command on a dead connection got ECONNRESET.",
+    "postmortem": "Every client behind an NLB needs TCP keepalive below the idle timeout. Restarts only masked the problem.",
+    "trigger_deploy_id": "DEP-2212",
+    "agent_suggestions": [],
+    "dejavu_assisted": false
+  },
+  {
+    "id": "INC-036",
+    "title": "Email backlog of 120k — SMTP relay returning 421 rate-limit responses",
+    "service": "notification-worker",
+    "severity": "SEV3",
+    "pattern": "smtp-rate-limit",
+    "started_at": "2026-08-06T05:40:00Z",
+    "resolved_at": "2026-08-06T06:28:00Z",
+    "ttr_minutes": 48,
+    "triage_minutes": 8,
+    "commander": "Arjun Mehta",
+    "responders": [
+      "Emily Chen",
+      "Priya Raman"
+    ],
+    "alert": "notification-worker queue depth 120k (threshold 10k); SMTP 421 responses rising",
+    "symptoms": [
+      "Email sends failing with SMTP 421",
+      "Backlog growing during the flash sale"
+    ],
+    "metrics": {
+      "queue_depth": 120000,
+      "smtp_421_per_min": 900
+    },
+    "logs": [
+      "2026-08-06T05:40:30Z ERROR notifications.smtp: SMTPResponseException: (421, b'4.7.0 Try again later, rate limit exceeded')",
+      "2026-08-06T05:41:29Z WARN  celery.app.trace: Task notifications.send_email[50def917] retry: Retry in 5s"
+    ],
+    "steps": [
+      {
+        "action": "Scale notification-worker from 4 to 12 pods",
+        "outcome": "FAILED",
+        "minutes": 11,
+        "notes": "More parallel sends; 421 responses tripled",
+        "by": "Emily Chen",
+        "at": "2026-08-06T06:04:00Z"
+      },
+      {
+        "action": "Apply Celery rate_limit=40/s on send_email with exponential backoff",
+        "outcome": "WORKED",
+        "minutes": 24,
+        "notes": "Backlog drained in 50 minutes",
+        "by": "Emily Chen",
+        "at": "2026-08-06T06:28:00Z"
+      }
+    ],
+    "root_cause": "Sale traffic exceeded the SMTP relay account's 50 messages/s limit; retries without backoff amplified the load.",
+    "postmortem": "Scaling out does not help when the bottleneck is an external rate limit. Action items: rate limit at the queue, request a higher relay quota before sales.",
+    "trigger_deploy_id": null,
+    "agent_suggestions": [
+      {
+        "suggestion": "Check the SMTP relay's per-account rate limit and throttle sends instead of scaling out (no similar past incidents in memory)",
+        "accepted": true,
+        "outcome": "WORKED",
+        "notes": "Engineer applied a Celery rate limit after scale-out failed"
+      }
+    ],
+    "dejavu_assisted": true
+  },
+  {
+    "id": "INC-037",
+    "title": "redis-cache failover — clients stuck writing to demoted replica (READONLY errors)",
+    "service": "redis-cache",
+    "severity": "SEV2",
+    "pattern": "redis-failover",
+    "started_at": "2026-08-10T16:29:00Z",
+    "resolved_at": "2026-08-10T17:18:00Z",
+    "ttr_minutes": 49,
+    "triage_minutes": 7,
+    "commander": "Aisha Okafor",
+    "responders": [
+      "Rahul Iyer",
+      "Fatima Sheikh"
+    ],
+    "alert": "checkout-api and auth-service Redis errors 'READONLY You can't write against a read only replica'",
+    "symptoms": [
+      "Writes to Redis failing after Sentinel failover",
+      "Reads still working"
+    ],
+    "metrics": {
+      "redis_write_errors_per_min": 5200
+    },
+    "logs": [
+      "2026-08-10T16:29:30Z ERROR io.lettuce.core.RedisCommandExecutionException: READONLY You can't write against a read only replica.",
+      "2026-08-10T16:29:53Z +switch-master acme-main 10.42.9.14 6379 10.42.9.31 6379"
+    ],
+    "steps": [
+      {
+        "action": "Restart checkout-api pods",
+        "outcome": "PARTIAL",
+        "minutes": 10,
+        "notes": "checkout-api recovered but auth-service still failing",
+        "by": "Rahul Iyer",
+        "at": "2026-08-10T16:48:00Z"
+      },
+      {
+        "action": "Point clients at Sentinel for master discovery instead of the static redis-cache service IP",
+        "outcome": "WORKED",
+        "minutes": 30,
+        "notes": "Both services write to the new primary",
+        "by": "Aisha Okafor",
+        "at": "2026-08-10T17:18:00Z"
+      }
+    ],
+    "root_cause": "Clients connected to a static service endpoint that still pointed at the old primary after Sentinel promoted a replica.",
+    "postmortem": "All Redis clients must use Sentinel discovery. Restarts are a band-aid for stale connections.",
+    "trigger_deploy_id": null,
+    "agent_suggestions": [
+      {
+        "suggestion": "Restart application pods to drop stale Redis connections",
+        "accepted": true,
+        "outcome": "PARTIAL",
+        "notes": "Helped checkout-api only; the real fix was Sentinel-aware clients"
+      }
+    ],
+    "dejavu_assisted": true
+  },
+  {
+    "id": "INC-038",
+    "title": "notification-worker failing — inventory-db 'remaining connection slots are reserved'",
+    "service": "notification-worker",
+    "severity": "SEV2",
+    "pattern": "db-pool-exhaustion",
+    "started_at": "2026-08-14T10:18:00Z",
+    "resolved_at": "2026-08-14T11:13:00Z",
+    "ttr_minutes": 55,
+    "triage_minutes": 12,
+    "commander": "Ananya Das",
+    "responders": [
+      "Emily Chen",
+      "Lucas Silva"
+    ],
+    "alert": "notification-worker task failure rate 64%; checkout-api 5xx rising to 6% (shared inventory-db)",
+    "symptoms": [
+      "Celery tasks failing with psycopg2 OperationalError",
+      "inventory-db at max_connections",
+      "Celery autoscaler had grown workers from 4 to 20",
+      "checkout-api also degraded"
+    ],
+    "metrics": {
+      "task_failure_rate": "64%",
+      "pg_connections": "400/400",
+      "celery_workers": 20
+    },
+    "logs": [
+      "2026-08-14T10:18:30Z ERROR celery.app.trace: Task notifications.send_order_email[6849ef30] raised unexpected: OperationalError('(psycopg2.OperationalError) connection to server at \"inventory-db.acme.internal\" (10.42.5.10), port 5432 failed: FATAL:  remaining connection slots are reserved for non-replication superuser connections')",
+      "2026-08-14T10:19:10Z WARN  sqlalchemy.pool.impl.QueuePool: QueuePool limit of size 10 overflow 20 reached, connection timed out, timeout 30.00",
+      "2026-08-14T10:19:26Z FATAL:  remaining connection slots are reserved for non-replication superuser connections  (inventory-db, client 10.42.7.13)"
+    ],
+    "steps": [
+      {
+        "action": "Restart notification-worker pods",
+        "outcome": "FAILED",
+        "minutes": 7,
+        "notes": "Failures returned within 3 minutes once the autoscaler ramped workers up again",
+        "by": "Ananya Das",
+        "at": "2026-08-14T10:44:00Z"
+      },
+      {
+        "action": "Terminate sessions idle for >5 minutes on inventory-db (pg_terminate_backend)",
+        "outcome": "PARTIAL",
+        "minutes": 8,
+        "notes": "Freed ~90 slots briefly",
+        "by": "Emily Chen",
+        "at": "2026-08-14T10:52:00Z"
+      },
+      {
+        "action": "Cap SQLAlchemy pool (pool_size=5, max_overflow=0) and Celery autoscale max at 8",
+        "outcome": "WORKED",
+        "minutes": 21,
+        "notes": "Connections stable at 240/400, tasks succeeding",
+        "by": "Ananya Das",
+        "at": "2026-08-14T11:13:00Z"
+      }
+    ],
+    "root_cause": "Connection-pool exhaustion on inventory-db: Celery autoscaling (4 -> 20 workers) with SQLAlchemy pool_size 10 + overflow 20 per worker exceeded max_connections=400.",
+    "postmortem": "Second pool-exhaustion incident on inventory-db in a month (see INC-031). Any autoscaled consumer must have its worst-case connection count budgeted against max_connections. Restarting pods failed again.",
+    "trigger_deploy_id": null,
+    "agent_suggestions": [
+      {
+        "suggestion": "Matches INC-031 (inventory-db pool exhaustion). Do not restart pods — that failed in INC-031. Kill idle sessions and cap per-worker pool size.",
+        "accepted": true,
+        "outcome": "WORKED",
+        "notes": "The engineer had restarted pods before reading the suggestion; the restart failed exactly as in INC-031"
+      }
+    ],
+    "dejavu_assisted": true
+  },
+  {
+    "id": "INC-039",
+    "title": "Login latency p99 9s and CPU 100% after bcrypt cost factor change",
+    "service": "auth-service",
+    "severity": "SEV2",
+    "pattern": "bcrypt-cost",
+    "started_at": "2026-08-18T10:45:00Z",
+    "resolved_at": "2026-08-18T11:17:00Z",
+    "ttr_minutes": 32,
+    "triage_minutes": 6,
+    "commander": "Ananya Das",
+    "responders": [
+      "Aisha Okafor",
+      "Lucas Silva"
+    ],
+    "alert": "auth-service /login p99 latency 9.2s (threshold 1s); CPU 100% on all pods",
+    "symptoms": [
+      "Login requests queueing",
+      "CPU pinned; other endpoints fine when not co-located"
+    ],
+    "metrics": {
+      "login_p99_ms": 9200,
+      "cpu": "100%"
+    },
+    "logs": [
+      "2026-08-18T10:45:30Z WARN  [http] POST /login took 9184ms req=ac2acaf1",
+      "2026-08-18T10:46:26Z INFO  [password] hash cost=14 duration_ms=1180"
+    ],
+    "steps": [
+      {
+        "action": "Scale auth-service from 6 to 12 pods",
+        "outcome": "PARTIAL",
+        "minutes": 12,
+        "notes": "p99 improved to 4s but CPU still saturated",
+        "by": "Aisha Okafor",
+        "at": "2026-08-18T11:08:00Z"
+      },
+      {
+        "action": "Roll back auth-service to v3.7.2",
+        "outcome": "WORKED",
+        "minutes": 9,
+        "notes": "Login p99 back to 180ms",
+        "by": "Ananya Das",
+        "at": "2026-08-18T11:17:00Z"
+      }
+    ],
+    "root_cause": "bcrypt cost 14 is 16x more CPU per hash than cost 10; login traffic saturated every pod.",
+    "postmortem": "Hashing cost changes need load testing and gradual rollout with rehash-on-login.",
+    "trigger_deploy_id": "DEP-2219",
+    "agent_suggestions": [
+      {
+        "suggestion": "Deploy auth-service v3.8.0 landed 30 minutes before the alert and changes password hashing cost — roll it back first",
+        "accepted": true,
+        "outcome": "WORKED",
+        "notes": "Rollback resolved it"
+      }
+    ],
+    "dejavu_assisted": true
+  },
+  {
+    "id": "INC-040",
+    "title": "Slow order-history queries after migration dropped idx_orders_customer_created",
+    "service": "inventory-db",
+    "severity": "SEV2",
+    "pattern": "missing-index",
+    "started_at": "2026-08-22T13:15:00Z",
+    "resolved_at": "2026-08-22T14:08:00Z",
+    "ttr_minutes": 53,
+    "triage_minutes": 7,
+    "commander": "Olivia Novak",
+    "responders": [
+      "Tom Becker",
+      "Sneha Kulkarni"
+    ],
+    "alert": "inventory-db slow query rate 340/min (>1s); checkout-api /orders p99 8.4s",
+    "symptoms": [
+      "Sequential scans on orders",
+      "Active (not idle) connections waiting on IO",
+      "Connection count high but below max_connections"
+    ],
+    "metrics": {
+      "slow_queries_per_min": 340,
+      "pg_connections": "310/400",
+      "orders_seq_scans_per_min": 290
+    },
+    "logs": [
+      "2026-08-22T13:15:30Z LOG:  duration: 8423.117 ms  statement: SELECT id, total, status FROM orders WHERE customer_id = $1 ORDER BY created_at DESC LIMIT 20",
+      "2026-08-22T13:16:27Z ERROR c.a.checkout.api.OrderHistoryController - GET /orders timed out after 8000ms req=4319e1b4"
+    ],
+    "steps": [
+      {
+        "action": "Route order-history reads to the read replica",
+        "outcome": "PARTIAL",
+        "minutes": 15,
+        "notes": "Primary recovered, replica now slow",
+        "by": "Tom Becker",
+        "at": "2026-08-22T13:42:00Z"
+      },
+      {
+        "action": "CREATE INDEX CONCURRENTLY idx_orders_customer_created ON orders(customer_id, created_at DESC)",
+        "outcome": "WORKED",
+        "minutes": 26,
+        "notes": "Query time back to 3ms",
+        "by": "Sneha Kulkarni",
+        "at": "2026-08-22T14:08:00Z"
+      }
+    ],
+    "root_cause": "Migration V212 dropped the (customer_id, created_at) index; order-history queries fell back to sequential scans.",
+    "postmortem": "High connection counts alone do not mean pool exhaustion. Déjà Vu's pool-size suggestion was wrong here; the distinguishing signal is active queries with IO waits and seq scans. Migrations must not drop an index before its replacement exists.",
+    "trigger_deploy_id": "DEP-2221",
+    "agent_suggestions": [
+      {
+        "suggestion": "Raise pool sizes — symptoms resemble INC-031/INC-038 pool exhaustion",
+        "accepted": false,
+        "outcome": "REJECTED",
+        "notes": "Engineer rejected: pg_stat_activity showed active queries waiting on IO, not idle-in-transaction sessions. Lesson: check wait_event and seq scans before assuming pool exhaustion."
+      }
+    ],
+    "dejavu_assisted": true
+  },
+  {
+    "id": "INC-041",
+    "title": "Payment authorizations failing — PayFlow TLS handshake timeouts after connection-pool config change",
+    "service": "payment-service",
+    "severity": "SEV1",
+    "pattern": "payment-config-psp",
+    "started_at": "2026-08-26T09:11:00Z",
+    "resolved_at": "2026-08-26T09:41:00Z",
+    "ttr_minutes": 30,
+    "triage_minutes": 9,
+    "commander": "Sneha Kulkarni",
+    "responders": [
+      "Lucas Silva",
+      "Maria Gonzalez"
+    ],
+    "alert": "payment-service authorize success rate 72%; p99 latency 6.1s during evening peak",
+    "symptoms": [
+      "TLS handshake timeouts to PayFlow",
+      "New outbound TLS connections up 30x",
+      "Started during peak evening traffic"
+    ],
+    "metrics": {
+      "authorize_success_rate": "72%",
+      "p99_latency_ms": 6100,
+      "new_tls_conns_per_s": 840
+    },
+    "logs": [
+      "2026-08-26T09:11:30Z level=error msg=\"payflow authorize failed\" order_id=ORD-86898936 err=\"net/http: TLS handshake timeout\"",
+      "2026-08-26T09:12:37Z level=error msg=\"payflow authorize failed\" order_id=ORD-85624446 err=\"dial tcp 52.66.14.201:443: i/o timeout\"",
+      "2026-08-26T09:14:28Z level=warn msg=\"http transport stats\" idle_conns=10 new_conns_per_s=840"
+    ],
+    "steps": [
+      {
+        "action": "Restart payment-service pods",
+        "outcome": "FAILED",
+        "minutes": 7,
+        "notes": "No improvement",
+        "by": "Maria Gonzalez",
+        "at": "2026-08-26T09:30:00Z"
+      },
+      {
+        "action": "Revert PayFlow HTTP transport config (max_idle_conns_per_host=100, idle_conn_timeout=90s)",
+        "outcome": "WORKED",
+        "minutes": 11,
+        "notes": "Success rate back to 97%",
+        "by": "Maria Gonzalez",
+        "at": "2026-08-26T09:41:00Z"
+      }
+    ],
+    "root_cause": "With only 10 idle connections per host, peak traffic forced a new TLS handshake for most PayFlow calls, overwhelming the TLS handshake budget.",
+    "postmortem": "Second SEV1 in 5 weeks caused by a payment-service PayFlow client config change (see INC-033). All payment-service PSP config changes now require a canary and an explicit risk review.",
+    "trigger_deploy_id": "DEP-2222",
+    "agent_suggestions": [
+      {
+        "suggestion": "Matches INC-033: a payment-service PayFlow client config change preceded a SEV1. Revert config r97 first; restarts did not help in INC-033.",
+        "accepted": true,
+        "outcome": "WORKED",
+        "notes": "Reverting the config resolved it in 11 minutes"
+      }
+    ],
+    "dejavu_assisted": true
+  },
+  {
+    "id": "INC-042",
+    "title": "Users logged out en masse — redis-cache evicting sessions after session TTL change",
+    "service": "redis-cache",
+    "severity": "SEV2",
+    "pattern": "redis-eviction-ttl",
+    "started_at": "2026-08-30T13:13:00Z",
+    "resolved_at": "2026-08-30T13:51:00Z",
+    "ttr_minutes": 38,
+    "triage_minutes": 4,
+    "commander": "Aisha Okafor",
+    "responders": [
+      "Tom Becker",
+      "Priya Raman"
+    ],
+    "alert": "auth-service 'session not found' rate 31%; redis-cache evicted_keys 22k/s",
+    "symptoms": [
+      "Users randomly logged out",
+      "Redis at maxmemory",
+      "Session keyspace grew 9x in 2 days"
+    ],
+    "metrics": {
+      "evicted_keys_per_s": 22000,
+      "used_memory": "6.00G/6.00G",
+      "session_miss_rate": "31%"
+    },
+    "logs": [
+      "2026-08-30T13:13:30Z WARN  [session-store] session not found for sid=s:853040b7 — forcing re-login",
+      "2026-08-30T13:14:23Z # redis-cache INFO: used_memory_human:6.00G maxmemory_human:6.00G evicted_keys:40229118"
+    ],
+    "steps": [
+      {
+        "action": "Restart redis-cache",
+        "outcome": "FAILED",
+        "minutes": 9,
+        "notes": "Cold cache: every session lost and inventory-db read load spiked",
+        "by": "Tom Becker",
+        "at": "2026-08-30T13:33:00Z"
+      },
+      {
+        "action": "Revert session TTL to 30m, set maxmemory-policy volatile-lru and raise maxmemory to 10gb",
+        "outcome": "WORKED",
+        "minutes": 18,
+        "notes": "Evictions stopped within 10 minutes",
+        "by": "Aisha Okafor",
+        "at": "2026-08-30T13:51:00Z"
+      }
+    ],
+    "root_cause": "The 7-day session TTL grew the session keyspace 9x past maxmemory, evicting sessions and catalog keys.",
+    "postmortem": "Second eviction storm from a TTL change (see INC-029). TTL changes on redis-cache now require a memory estimate. Restarting/flushing Redis failed again.",
+    "trigger_deploy_id": "DEP-2223",
+    "agent_suggestions": [
+      {
+        "suggestion": "Matches INC-029: a cache TTL change caused a Redis eviction storm. Revert the TTL and raise maxmemory; do NOT flush or restart Redis (flush failed in INC-029).",
+        "accepted": false,
+        "outcome": "WORKED",
+        "notes": "Engineer restarted Redis first (failed), then applied the suggestion, which worked"
+      }
+    ],
+    "dejavu_assisted": true
+  },
+  {
+    "id": "INC-043",
+    "title": "Mobile users receiving 429 Too Many Requests after gateway rate-limit deploy",
+    "service": "api-gateway",
+    "severity": "SEV2",
+    "pattern": "rate-limit-nat",
+    "started_at": "2026-09-04T17:05:00Z",
+    "resolved_at": "2026-09-04T17:49:00Z",
+    "ttr_minutes": 44,
+    "triage_minutes": 6,
+    "commander": "Tom Becker",
+    "responders": [
+      "Sneha Kulkarni",
+      "Arjun Mehta"
+    ],
+    "alert": "api-gateway 429 ratio 18% for mobile clients",
+    "symptoms": [
+      "429s concentrated on mobile carrier IP ranges",
+      "Web traffic unaffected"
+    ],
+    "metrics": {
+      "mobile_429_ratio": "18%"
+    },
+    "logs": [
+      "2026-09-04T17:05:30Z [error] 30#30: *50060 limiting requests, excess: 100.450 by zone \"per_ip\", client: 10.42.6.172, server: api.acme.shop, request: \"GET /api/catalog/home HTTP/2.0\""
+    ],
+    "steps": [
+      {
+        "action": "Allowlist the top 3 mobile carrier ASNs",
+        "outcome": "PARTIAL",
+        "minutes": 14,
+        "notes": "Helped Jio users, Airtel still limited",
+        "by": "Sneha Kulkarni",
+        "at": "2026-09-04T17:29:00Z"
+      },
+      {
+        "action": "Change the rate-limit key from client IP to authenticated user ID",
+        "outcome": "WORKED",
+        "minutes": 20,
+        "notes": "429s back to baseline",
+        "by": "Arjun Mehta",
+        "at": "2026-09-04T17:49:00Z"
+      }
+    ],
+    "root_cause": "Per-IP rate limiting throttled mobile users behind carrier-grade NAT.",
+    "postmortem": "Rate limits for authenticated traffic must be keyed by user or token, not IP.",
+    "trigger_deploy_id": "DEP-2225",
+    "agent_suggestions": [
+      {
+        "suggestion": "api-gateway config r203 deployed 45 minutes before the alert added per-IP limits; carrier-grade NAT puts many users behind one IP — revert or key by user",
+        "accepted": true,
+        "outcome": "WORKED",
+        "notes": "Keyed by user ID"
+      }
+    ],
+    "dejavu_assisted": true
+  },
+  {
+    "id": "INC-044",
+    "title": "Login failures — auth-service pg pool timeouts, inventory-db out of connection slots",
+    "service": "auth-service",
+    "severity": "SEV1",
+    "pattern": "db-pool-exhaustion",
+    "started_at": "2026-09-09T13:59:00Z",
+    "resolved_at": "2026-09-09T14:47:00Z",
+    "ttr_minutes": 48,
+    "triage_minutes": 5,
+    "commander": "Arjun Mehta",
+    "responders": [
+      "Olivia Novak",
+      "Emily Chen"
+    ],
+    "alert": "auth-service login success rate 41%; 'timeout exceeded when trying to connect'",
+    "symptoms": [
+      "Logins failing after 10s",
+      "inventory-db at max_connections",
+      "auth-service HPA scaled from 6 to 20 pods after a marketing push notification"
+    ],
+    "metrics": {
+      "login_success_rate": "41%",
+      "pg_connections": "400/400",
+      "auth_pods": 20
+    },
+    "logs": [
+      "2026-09-09T13:59:30Z ERROR [db] Error: timeout exceeded when trying to connect at /app/node_modules/pg-pool/index.js:45:11 req=364f73bb",
+      "2026-09-09T14:00:18Z FATAL:  remaining connection slots are reserved for non-replication superuser connections  (inventory-db, client 10.42.7.109)",
+      "2026-09-09T14:00:50Z ERROR [login] POST /login 503 — accounts lookup failed: sorry, too many clients already"
+    ],
+    "steps": [
+      {
+        "action": "Restart auth-service pods",
+        "outcome": "FAILED",
+        "minutes": 6,
+        "notes": "Pool timeouts returned in under 3 minutes",
+        "by": "Olivia Novak",
+        "at": "2026-09-09T14:15:00Z"
+      },
+      {
+        "action": "Terminate idle sessions on inventory-db and cap pg Pool max from 25 to 10 per pod",
+        "outcome": "WORKED",
+        "minutes": 18,
+        "notes": "Connections 230/400, login success back to 99%",
+        "by": "Arjun Mehta",
+        "at": "2026-09-09T14:33:00Z"
+      },
+      {
+        "action": "Route auth-service through PgBouncer (transaction mode)",
+        "outcome": "WORKED",
+        "minutes": 14,
+        "notes": "Permanent fix; connection count independent of pod count",
+        "by": "Emily Chen",
+        "at": "2026-09-09T14:47:00Z"
+      }
+    ],
+    "root_cause": "Connection-pool exhaustion on inventory-db: auth-service HPA scale-out (6 -> 20 pods) x pg Pool max 25 = 500 connections > max_connections=400.",
+    "postmortem": "Third inventory-db pool-exhaustion incident (INC-031, INC-038). Restarting pods has now failed in all three. PgBouncer rollout to every service is the top reliability priority.",
+    "trigger_deploy_id": null,
+    "agent_suggestions": [
+      {
+        "suggestion": "Matches INC-031 and INC-038: inventory-db connection-pool exhaustion after scale-out. Restarting pods failed in both — skip it. Kill idle sessions and cap pool size per pod.",
+        "accepted": true,
+        "outcome": "WORKED",
+        "notes": "On-call restarted pods before reading the analysis (failed); the recommended fix worked in 18 minutes"
+      }
+    ],
+    "dejavu_assisted": true
+  },
+  {
+    "id": "INC-045",
+    "title": "checkout-api pods OOMKilled after JVM heap flag change",
+    "service": "checkout-api",
+    "severity": "SEV2",
+    "pattern": "jvm-oom",
+    "started_at": "2026-09-16T12:31:00Z",
+    "resolved_at": "2026-09-16T13:00:00Z",
+    "ttr_minutes": 29,
+    "triage_minutes": 7,
+    "commander": "Aisha Okafor",
+    "responders": [
+      "Fatima Sheikh",
+      "Priya Raman"
+    ],
+    "alert": "checkout-api pod restarts 14 in 10m (OOMKilled, exit code 137)",
+    "symptoms": [
+      "Pods killed by the kernel, not Java OutOfMemoryError",
+      "Started right after a config deploy"
+    ],
+    "metrics": {
+      "pod_restarts_10m": 14,
+      "container_limit": "3Gi",
+      "xmx": "3g"
+    },
+    "logs": [
+      "2026-09-16T12:31:30Z Last State: Terminated  Reason: OOMKilled  Exit Code: 137  (pod checkout-api-489a30fd5-bjmj7)",
+      "2026-09-16T12:32:30Z INFO  JVM flags: -Xmx3g -XX:+UseG1GC -XX:MaxDirectMemorySize=512m"
+    ],
+    "steps": [
+      {
+        "action": "Replace -Xmx3g with -XX:MaxRAMPercentage=75 (revert config r430)",
+        "outcome": "WORKED",
+        "minutes": 16,
+        "notes": "Restarts stopped",
+        "by": "Fatima Sheikh",
+        "at": "2026-09-16T13:00:00Z"
+      }
+    ],
+    "root_cause": "Heap sized equal to the container memory limit; metaspace, thread stacks and direct buffers pushed the container over 3Gi.",
+    "postmortem": "Size JVM heap as a percentage of the container limit, never equal to it.",
+    "trigger_deploy_id": "DEP-2228",
+    "agent_suggestions": [
+      {
+        "suggestion": "checkout-api config r430 set heap equal to the container limit, leaving no room for metaspace and direct buffers — revert it",
+        "accepted": true,
+        "outcome": "WORKED",
+        "notes": "Fixed in 16 minutes"
+      }
+    ],
+    "dejavu_assisted": true
+  },
+  {
+    "id": "INC-046",
+    "title": "Duplicate order-confirmation emails after Celery retry policy change",
+    "service": "notification-worker",
+    "severity": "SEV3",
+    "pattern": "duplicate-delivery",
+    "started_at": "2026-09-23T15:10:00Z",
+    "resolved_at": "2026-09-23T15:58:00Z",
+    "ttr_minutes": 48,
+    "triage_minutes": 12,
+    "commander": "Maria Gonzalez",
+    "responders": [
+      "Aisha Okafor",
+      "Arjun Mehta"
+    ],
+    "alert": "Customer support tickets: duplicate order confirmation emails (x2-x4)",
+    "symptoms": [
+      "Same email delivered 2-4 times",
+      "Only for tasks running longer than 5 minutes"
+    ],
+    "metrics": {
+      "duplicate_sends_per_hour": 1400
+    },
+    "logs": [
+      "2026-09-23T15:10:30Z WARN  kombu.transport.SQS: Message 5feeaa4e visibility timeout (300s) expired, redelivering",
+      "2026-09-23T15:11:28Z INFO  notifications.email: sent order_confirmation order_id=ORD-80519034 (attempt 3)"
+    ],
+    "steps": [
+      {
+        "action": "Raise visibility_timeout to 3600s",
+        "outcome": "WORKED",
+        "minutes": 12,
+        "notes": "Duplicates stopped",
+        "by": "Arjun Mehta",
+        "at": "2026-09-23T15:36:00Z"
+      },
+      {
+        "action": "Add per-order idempotency key to send_order_email",
+        "outcome": "WORKED",
+        "minutes": 22,
+        "notes": "Defence in depth",
+        "by": "Maria Gonzalez",
+        "at": "2026-09-23T15:58:00Z"
+      }
+    ],
+    "root_cause": "acks_late with a 300s visibility timeout redelivered tasks that took longer than 5 minutes.",
+    "postmortem": "Visibility timeout must exceed the longest task runtime; email sends need idempotency keys.",
+    "trigger_deploy_id": "DEP-2229",
+    "agent_suggestions": [
+      {
+        "suggestion": "notification-worker config r61 (acks_late + 300s visibility timeout) went out 4h earlier; long tasks are being redelivered — raise the visibility timeout",
+        "accepted": true,
+        "outcome": "WORKED",
+        "notes": "Resolved"
+      }
+    ],
+    "dejavu_assisted": true
+  }
+]

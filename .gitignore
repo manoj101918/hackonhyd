@@ -1,0 +1,25 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Env / secrets
+.env
+
+# Runtime state written by the backend (live demo runs)
+data/runtime/
+
+# Organiser handouts (not part of the project)
+*Content Guide*.pdf
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/

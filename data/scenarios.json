@@ -1,0 +1,234 @@
+{
+  "services": {
+    "checkout-api": "Java 21 / Spring Boot 3, HikariCP pool to inventory-db, 8-24 pods (HPA)",
+    "payment-service": "Go 1.23, pgxpool to inventory-db, calls the PayFlow card-payments PSP",
+    "inventory-db": "PostgreSQL 15 cluster (primary + 2 replicas), max_connections=400, hosts inventory, orders, accounts and payments databases",
+    "auth-service": "Node.js 20 / Express, RS256 JWTs, sessions in redis-cache, accounts DB on inventory-db",
+    "notification-worker": "Python 3.12 / Celery, SQLAlchemy, sends email + push via SMTP relay",
+    "redis-cache": "Redis 7.2 with Sentinel, maxmemory 6gb, shared by checkout-api and auth-service",
+    "api-gateway": "ingress-nginx in front of all public APIs at api.acme.shop"
+  },
+  "baseline_logs": {
+    "checkout-api": [
+      "INFO  c.a.checkout.api.OrderController - POST /checkout/confirm 200 in 142ms",
+      "INFO  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Pool stats (total=10, active=3, idle=7, waiting=0)"
+    ],
+    "payment-service": [
+      "level=info msg=\"payflow authorize ok\" latency_ms=640",
+      "level=info msg=\"confirm payment ok\" latency_ms=18"
+    ],
+    "inventory-db": [
+      "LOG:  checkpoint complete: wrote 1822 buffers (1.4%)",
+      "LOG:  pg_stat_activity snapshot: total=164 active=38 idle=126 (max_connections=400)"
+    ],
+    "auth-service": [
+      "INFO  [http] POST /login 200 184ms",
+      "INFO  [jwks] refreshed keyset (2 keys)"
+    ],
+    "notification-worker": [
+      "INFO  celery.worker: Task notifications.send_order_email succeeded in 0.41s",
+      "INFO  celery.worker: queue depth 112"
+    ],
+    "redis-cache": [
+      "# INFO: used_memory_human:3.12G maxmemory_human:10.00G evicted_keys:0",
+      "# INFO: connected_clients:412 instantaneous_ops_per_sec:18422"
+    ],
+    "api-gateway": [
+      "[info] 200 GET /api/catalog/home 38ms",
+      "[info] 200 POST /api/checkout/confirm 162ms"
+    ]
+  },
+  "scenarios": [
+    {
+      "id": "s1-checkout-500s",
+      "incident_id": "INC-047",
+      "kind": "incident",
+      "title": "checkout-api throwing HTTP 500s during the weekend flash sale",
+      "service": "checkout-api",
+      "severity": "SEV1",
+      "alert": "checkout-api HTTP 5xx ratio 31% (threshold 2%) for 5m; p99 latency 29.8s",
+      "symptoms": [
+        "31% of POST /checkout/confirm requests return HTTP 500",
+        "Requests hang ~30s before failing",
+        "HPA scaled checkout-api from 10 to 22 pods 15 minutes ago for the flash sale"
+      ],
+      "metrics": {
+        "http_5xx_ratio": "31%",
+        "p99_latency_ms": 29800,
+        "checkout_pods": 22,
+        "pg_connections": "398/400"
+      },
+      "logs": {
+        "checkout-api": [
+          {
+            "offset_s": -900,
+            "line": "INFO  HorizontalPodAutoscaler checkout-api: scaled from 10 to 22 replicas (cpu 84% > target 60%)"
+          },
+          {
+            "offset_s": -420,
+            "line": "WARN  com.zaxxer.hikari.pool.HikariPool - HikariPool-1 - Pool stats (total=20, active=20, idle=0, waiting=57)"
+          },
+          {
+            "offset_s": -300,
+            "line": "ERROR o.h.engine.jdbc.spi.SqlExceptionHelper - HikariPool-1 - Connection is not available, request timed out after 30000ms."
+          },
+          {
+            "offset_s": -240,
+            "line": "ERROR c.a.checkout.api.OrderController - POST /checkout/confirm failed req=7f3a9c21: org.springframework.jdbc.CannotGetJdbcConnectionException: Failed to obtain JDBC Connection"
+          },
+          {
+            "offset_s": -180,
+            "line": "ERROR o.h.engine.jdbc.spi.SqlExceptionHelper - HikariPool-1 - Connection is not available, request timed out after 30000ms."
+          },
+          {
+            "offset_s": -60,
+            "line": "ERROR c.a.checkout.api.OrderController - POST /checkout/confirm failed req=b81e04d7: CannotGetJdbcConnectionException: HikariPool-1 - Connection is not available"
+          }
+        ],
+        "inventory-db": [
+          {
+            "offset_s": -330,
+            "line": "FATAL:  remaining connection slots are reserved for non-replication superuser connections  (client 10.42.6.18)"
+          },
+          {
+            "offset_s": -200,
+            "line": "FATAL:  remaining connection slots are reserved for non-replication superuser connections  (client 10.42.6.44)"
+          },
+          {
+            "offset_s": -120,
+            "line": "LOG:  pg_stat_activity snapshot: total=398 active=121 idle=69 'idle in transaction'=208 (max_connections=400)"
+          }
+        ]
+      },
+      "deploys": [
+        {
+          "service": "checkout-api",
+          "kind": "code",
+          "version": "checkout-api v2.31.0",
+          "description": "Wishlist price-drop banner on product page",
+          "hours_ago": 26
+        },
+        {
+          "service": "api-gateway",
+          "kind": "config",
+          "version": "api-gateway config r211",
+          "description": "Increase access log retention to 14 days",
+          "hours_ago": 5
+        },
+        {
+          "service": "notification-worker",
+          "kind": "code",
+          "version": "notification-worker v1.19.2",
+          "description": "Localised SMS templates (Hindi, Telugu)",
+          "hours_ago": 3
+        }
+      ],
+      "resolution": {
+        "root_cause": "inventory-db connection-pool exhaustion: HPA scale-out (10 -> 22 pods) x Hikari pool 20 exceeded max_connections=400, with ~200 sessions idle in transaction.",
+        "worked": [
+          "Terminate idle-in-transaction sessions on inventory-db",
+          "Cap Hikari maximumPoolSize at 10 per pod and set idle_in_transaction_session_timeout=60s"
+        ],
+        "failed": [
+          "Restart checkout-api pods",
+          "Scale out checkout-api"
+        ],
+        "ttr_minutes_expected": 18
+      }
+    },
+    {
+      "id": "s2-payment-pool",
+      "incident_id": "INC-048",
+      "kind": "incident",
+      "title": "payment-service failing to confirm payments — database connection errors",
+      "service": "payment-service",
+      "severity": "SEV1",
+      "alert": "payment-service /payments/confirm error rate 27%; 'pgxpool: acquire: context deadline exceeded'",
+      "symptoms": [
+        "27% of payment confirmations fail",
+        "Card authorisations at PayFlow succeed but the result cannot be written",
+        "Started ~40 minutes after a payment-service config deploy"
+      ],
+      "metrics": {
+        "confirm_error_rate": "27%",
+        "pg_connections": "400/400",
+        "payment_pods": 12
+      },
+      "logs": {
+        "payment-service": [
+          {
+            "offset_s": -600,
+            "line": "level=info msg=\"pgxpool config loaded\" max_conns=60 min_conns=20 pods=12"
+          },
+          {
+            "offset_s": -360,
+            "line": "level=error msg=\"confirm payment failed\" order_id=ORD-88412093 err=\"pgxpool: acquire: context deadline exceeded\""
+          },
+          {
+            "offset_s": -250,
+            "line": "level=error msg=\"confirm payment failed\" order_id=ORD-88412311 err=\"failed to connect to `host=inventory-db.acme.internal user=payments database=payments`: server error (FATAL: remaining connection slots are reserved for non-replication superuser connections (SQLSTATE 53300))\""
+          },
+          {
+            "offset_s": -90,
+            "line": "level=error msg=\"confirm payment failed\" order_id=ORD-88412570 err=\"pgxpool: acquire: context deadline exceeded\""
+          }
+        ],
+        "inventory-db": [
+          {
+            "offset_s": -280,
+            "line": "FATAL:  remaining connection slots are reserved for non-replication superuser connections  (client 10.42.8.12)"
+          },
+          {
+            "offset_s": -100,
+            "line": "LOG:  pg_stat_activity snapshot: total=400 by_user payments=246 checkout=98 notifications=56 (max_connections=400)"
+          }
+        ]
+      },
+      "deploys": [
+        {
+          "service": "payment-service",
+          "kind": "config",
+          "version": "payment-service config r104",
+          "description": "Raise pgxpool max_conns from 20 to 60 and min_conns to 20 per pod ahead of the sale",
+          "hours_ago": 0.75
+        },
+        {
+          "service": "checkout-api",
+          "kind": "code",
+          "version": "checkout-api v2.31.1",
+          "description": "Fix typo in order confirmation page",
+          "hours_ago": 8
+        }
+      ],
+      "resolution": {
+        "root_cause": "inventory-db connection-pool exhaustion: payment-service config r104 raised pgxpool max_conns to 60 x 12 pods, crowding out other services on max_connections=400.",
+        "worked": [
+          "Revert payment-service config r104 (max_conns back to 20)",
+          "Terminate idle payments sessions on inventory-db"
+        ],
+        "failed": [
+          "Restart payment-service pods"
+        ],
+        "ttr_minutes_expected": 12
+      }
+    },
+    {
+      "id": "s3-deploy-check",
+      "incident_id": null,
+      "kind": "deploy_check",
+      "title": "Deploy check: payment-service PayFlow client tuning before the sale",
+      "service": "payment-service",
+      "severity": null,
+      "planned_change": "payment-service config: lower the PayFlow HTTP client timeout from 8000ms to 2500ms and reduce max_idle_conns_per_host from 100 to 20 to cut memory before the Diwali sale.",
+      "resolution": {
+        "expected_risk": "high",
+        "evidence": [
+          "INC-033",
+          "INC-041"
+        ],
+        "reason": "Both previous PayFlow client config changes on payment-service preceded SEV1 outages."
+      },
+      "logs": {}
+    }
+  ]
+}

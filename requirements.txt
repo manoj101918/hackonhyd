@@ -1,0 +1,10 @@
+# Pinned versions the project was built and tested with. `pip install -e ".[dev]"` uses pyproject.toml.
+fastapi==0.141.1
+uvicorn[standard]==0.54.0
+pydantic==2.13.5
+pydantic-settings==2.15.0
+hindsight-client==0.10.2
+openai==3.20.0
+httpx==0.28.1
+pytest==9.1.1
+pytest-asyncio==1.4.0

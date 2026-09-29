@@ -1,0 +1,13 @@
+# docker compose up --build      -> UI on http://localhost:5173
+# Seed memory once:  docker compose run --rm backend python scripts/seed_memory.py
+services:
+  backend:
+    build: { context: ., dockerfile: backend/Dockerfile }
+    env_file: .env
+    volumes:
+      - ./data/runtime:/app/data/runtime
+    ports: ["8000:8000"]
+  frontend:
+    build: ./frontend
+    depends_on: [backend]
+    ports: ["5173:80"]

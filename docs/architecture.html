@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Déjà Vu architecture</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root { --bg:#0b0d10; --surface:#12151a; --surface2:#181c22; --line:#2c333d; --ink:#e8eaed; --ink2:#a9afb8; --ink3:#6f7782; --mem:#9f8cff; --memdim:#231e44; }
+  * { box-sizing: border-box; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font-family: Inter, sans-serif; width: 1600px; height: 900px; padding: 48px 56px; }
+  h1 { font-size: 30px; font-weight: 700; letter-spacing: -.01em; }
+  .sub { color: var(--ink2); font-size: 17px; margin-top: 6px; }
+  .grid { position: relative; margin-top: 44px; height: 680px; }
+  .box { position: absolute; border: 1.5px solid var(--line); background: var(--surface); border-radius: 14px; padding: 16px 18px; }
+  .box h3 { font-size: 17px; font-weight: 600; }
+  .box p { font-size: 13.5px; color: var(--ink2); margin-top: 6px; line-height: 1.45; }
+  .mono { font-family: 'JetBrains Mono', monospace; font-size: 12.5px; color: var(--ink3); }
+  .mem { border-color: var(--mem); background: var(--memdim); }
+  .mem h3 { color: #cfc6ff; }
+  .tag { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 11.5px; padding: 2px 7px; border-radius: 5px; margin: 6px 4px 0 0; border: 1px solid #3a3470; color: #cfc6ff; background: #1a1636; }
+  svg { position: absolute; inset: 0; overflow: visible; }
+  .lbl { fill: var(--ink2); font: 500 13px Inter, sans-serif; }
+  .lblm { fill: #cfc6ff; font: 600 13px Inter, sans-serif; }
+</style>
+</head>
+<body>
+  <h1>Déjà Vu — where Hindsight sits</h1>
+  <div class="sub">An incident-response agent whose every answer starts from long-term memory of past incidents, fixes that worked, and fixes that failed.</div>
+  <div class="grid">
+    <svg width="1488" height="680">
+      <defs>
+        <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6f7782"/></marker>
+        <marker id="m" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#9f8cff"/></marker>
+      </defs>
+      <!-- alert -> agent -->
+      <line x1="250" y1="120" x2="398" y2="120" stroke="#6f7782" stroke-width="2" marker-end="url(#a)"/>
+      <text class="lbl" x="262" y="108">alert</text>
+      <!-- agent -> llm -->
+      <line x1="700" y1="120" x2="1028" y2="120" stroke="#6f7782" stroke-width="2" marker-end="url(#a)"/>
+      <text class="lbl" x="742" y="108">tool loop · max 8 steps · JSON answer</text>
+      <!-- agent -> memory (triage recall) -->
+      <line x1="560" y1="232" x2="560" y2="388" stroke="#9f8cff" stroke-width="2.5" marker-end="url(#m)"/>
+      <text class="lblm" x="574" y="300">1 · recall ×3 (always, before the LLM)</text>
+      <text class="lblm" x="574" y="320">reflect · deploy-risk check</text>
+      <!-- engineer -> memory (retain) -->
+      <path d="M 150 176 L 150 470 L 398 470" fill="none" stroke="#9f8cff" stroke-width="2.5" marker-end="url(#m)"/>
+      <text class="lblm" x="164" y="440">2 · retain verified outcomes</text>
+      <!-- memory -> UI -->
+      <line x1="700" y1="500" x2="1028" y2="500" stroke="#9f8cff" stroke-width="2.5" marker-end="url(#m)"/>
+      <text class="lblm" x="720" y="488">3 · observations + playbook</text>
+      <!-- agent -> world -->
+      <path d="M 700 180 L 860 180 L 860 290 L 1028 290" fill="none" stroke="#6f7782" stroke-width="2" marker-end="url(#a)"/>
+      <text class="lbl" x="872" y="276">logs · deploys</text>
+    </svg>
+
+    <div class="box" style="left:0; top:40px; width:250px; height:138px;">
+      <h3>On-call engineer</h3>
+      <p>Alert arrives in the incident channel. Marks each suggested step <b>worked</b> / <b>failed</b>, resolves with a root cause.</p>
+    </div>
+
+    <div class="box" style="left:400px; top:40px; width:300px; height:190px;">
+      <h3>Incident agent</h3>
+      <p>FastAPI + a bounded tool-calling loop. Streams every step to the UI over SSE.</p>
+      <p class="mono" style="margin-top:10px">agent.py · tools.py</p>
+      <p>Grounding pass strips any incident ID memory never returned.</p>
+    </div>
+
+    <div class="box" style="left:1030px; top:40px; width:300px;">
+      <h3>LLM (Groq)</h3>
+      <p>gpt-oss-120b → qwen fallback. Repair retries on malformed tool calls; degraded memory-only answer if both fail.</p>
+    </div>
+
+    <div class="box" style="left:1030px; top:240px; width:300px;">
+      <h3>Production signals</h3>
+      <p>Service logs and the deploy / config-change feed.</p>
+    </div>
+
+    <div class="box mem" style="left:400px; top:390px; width:300px;">
+      <h3>Hindsight memory bank</h3>
+      <p>One document per incident: alert, every step with its outcome, the agent's own advice, postmortem. Deploys as their own documents.</p>
+      <div style="margin-top:6px">
+        <span class="tag">world</span><span class="tag">experience</span><span class="tag">observation</span>
+        <span class="tag">directives</span><span class="tag">mental model</span>
+      </div>
+    </div>
+
+    <div class="box" style="left:1030px; top:420px; width:300px;">
+      <h3>What it has learned</h3>
+      <p>Cross-incident observations Hindsight consolidates on its own, plus a self-refreshing remediation playbook.</p>
+    </div>
+  </div>
+</body>
+</html>

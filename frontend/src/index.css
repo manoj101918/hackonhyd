@@ -1,0 +1,61 @@
+@import "tailwindcss";
+
+/* Ops-console design tokens. Memory (the product's star) wears the violet accent everywhere. */
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --color-bg: #0b0d10;
+  --color-surface: #12151a;
+  --color-surface-2: #181c22;
+  --color-surface-3: #1f242c;
+  --color-line: #262c35;
+  --color-ink: #e8eaed;
+  --color-ink-2: #a9afb8;
+  --color-ink-3: #6f7782;
+
+  --color-memory: #9f8cff;
+  --color-memory-dim: #2a2450;
+
+  /* status: always paired with an icon/label, never colour alone */
+  --color-good: #3fb97a;
+  --color-warn: #d9a13b;
+  --color-bad: #e66767;
+
+  /* memory fact types */
+  --color-world: #3987e5;
+  --color-experience: #d98b3a;
+  --color-observation: #22b387;
+
+  /* chart series (validated: dark, all-pairs) */
+  --color-series-1: #3987e5;
+  --color-series-2: #d95926;
+  --color-series-3: #199e70;
+}
+
+html, body, #root { height: 100%; }
+body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  color-scheme: dark;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--color-line); border-radius: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+@keyframes pulse-ring { 0% { box-shadow: 0 0 0 0 rgb(159 140 255 / .5); } 100% { box-shadow: 0 0 0 10px rgb(159 140 255 / 0); } }
+.pulse-memory { animation: pulse-ring 1.6s ease-out infinite; }
+
+@keyframes slide-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.slide-in { animation: slide-in .25s ease-out both; }
+
+.markdown h2 { font-size: .95rem; font-weight: 600; margin: 1rem 0 .35rem; color: var(--color-ink); }
+.markdown h3 { font-size: .875rem; font-weight: 600; margin: .75rem 0 .25rem; }
+.markdown p, .markdown li { font-size: .8125rem; line-height: 1.55; color: var(--color-ink-2); }
+.markdown ul { list-style: disc; padding-left: 1.1rem; margin: .25rem 0; }
+.markdown ul ul { list-style: circle; }
+.markdown strong { color: var(--color-ink); font-weight: 600; }
+.markdown code { font-family: var(--font-mono); font-size: .75rem; background: var(--color-surface-3); padding: 0 .25rem; border-radius: 4px; }
